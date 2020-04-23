@@ -1,0 +1,20 @@
+<?php
+
+return [
+    // directory where metadata files will get saved
+    'target_dir' => /* TODO */,
+    // user agent describing your mirror node, if possible include domain name of mirror
+    'user_agent' => /* TODO */,
+    // source repository URL
+    'repo_url' => 'https://repo.packagist.org',
+    // source repository hostname (optional, will guess from repo_url)
+    //'repo_hostname' => 'repo.packagist.org',
+    // source API URL
+    'api_url' => 'https://packagist.org',
+    // how many times the script will run the mirroring step before exiting
+    'iterations' => 120,
+    // how many seconds to wait between mirror runs
+    'iteration_interval' => 5,
+    // set this to false if you do not run the --v1 mirror job, to ensure that the v2 will then take care of syncing packages.json
+    'has_v1_mirror' => true,
+];

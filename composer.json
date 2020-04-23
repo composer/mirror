@@ -1,0 +1,8 @@
+{
+    "require": {
+        "symfony/filesystem": "^4.4",
+        "symfony/finder": "^4.4",
+        "symfony/lock": "^4.4",
+        "symfony/http-client": "^4.4"
+    }
+}
