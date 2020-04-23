@@ -154,17 +154,15 @@ class Mirror {
         // clean up existing files in case we still have outdated packages
         if (is_dir($this->target.'/p2')) {
             $finder = Finder::create()->directories()->ignoreVCS(true)->in($this->target.'/p2');
-            foreach ($finder as $vendorDir) {
-                $vendorFiles = Finder::create()->files()->ignoreVCS(true)
-                    ->name('/\.json$/')
-                    ->in((string) $vendorDir);
+            $names = array_flip($list['packageNames']);
 
-                foreach ($vendorFiles as $file) {
+            foreach ($finder as $vendorDir) {
+                foreach (glob(((string) $vendorDir).'/*.json') as $file) {
                     if (!preg_match('{/([^/]+/[^/]+?)(~dev)?\.json$}', strtr($file, '\\', '/'), $match)) {
                         throw new \LogicException('Could not match package name from '.$path);
                     }
 
-                    if (!in_array($match[1], $list['packageNames'], true)) {
+                    if (!isset($names[$match[1]])) {
                         unlink((string) $file);
                         if (file_exists(((string) $file).'.gz')) {
                             unlink(((string) $file).'.gz');
