@@ -50,7 +50,7 @@ class Mirror {
         $this->userAgent = $config['user_agent'];
         $this->syncRootOnV2 = !($config['has_v1_mirror'] ?? true);
 
-        if ($config['statsd']) {
+        if (isset($config['statsd']) && is_array($config['statsd'])) {
             $this->statsdConnect($config['statsd'][0], $config['statsd'][1]);
         }
 
