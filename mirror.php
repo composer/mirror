@@ -205,11 +205,19 @@ class Mirror {
         $hasFailedRequests = false;
         $hasRetries = false;
 
-        $handleRetry = function ($response, array $userData) use (&$hasRetries, &$requests): bool {
-            $mtime = strtotime($response->getHeaders(false)['last-modified'][0]);
+        $responseNeedsRetry = function ($response, array $userData) use (&$hasRetries, &$requests): bool {
+            $is404 = $response->getStatusCode() === 404;
+            if (!$is404) {
+                $mtime = strtotime($response->getHeaders(false)['last-modified'][0]);
+            }
+
             // got an outdated file, possibly fetched from a mirror which was not yet up to date, so retry after 2sec
-            if ($mtime < $userData['minimumFilemtime']) {
+            if ($is404 || $mtime < $userData['minimumFilemtime']) {
                 if ($userData['retries'] > 2) {
+                    // 404s after 3 retries should be deemed to have really been deleted, so we stop retrying
+                    if ($is404) {
+                        return false;
+                    }
                     throw new \Exception('Too many retries, could not update '.$userData['path'].' as the origin server returns an older file ('.$mtime.', expected '.$userData['minimumFilemtime'].')');
                 }
                 $hasRetries = true;
@@ -243,8 +251,10 @@ class Mirror {
                             $response->cancel();
                             $this->downloaded++;
 
+                            // retry if the response is an outdated 304 as the mirror we are syncing from
+                            // looks outdated still
                             $userData = $response->getInfo('user_data');
-                            if ($handleRetry($response, $userData)) {
+                            if ($responseNeedsRetry($response, $userData)) {
                                 continue;
                             }
 
@@ -254,11 +264,19 @@ class Mirror {
                         }
 
                         if ($response->getStatusCode() === 404) {
+                            $response->cancel();
+                            $this->downloaded++;
+
+                            // 404s need to be retried just in case the mirror we are syncing from is not yet up to date
+                            // as othwerise this can lead to missing new packages' files as they'll be 404 instead of outdated 304s
+                            $userData = $response->getInfo('user_data');
+                            if ($responseNeedsRetry($response, $userData)) {
+                                continue;
+                            }
+
                             // ignore 404s for all v2 files as the package might have been deleted already
                             $this->output('?');
                             $this->statsdIncrement('mirror.not_found');
-                            $response->cancel();
-                            $this->downloaded++;
                             continue;
                         }
                     }
@@ -272,7 +290,7 @@ class Mirror {
                             throw new \Exception('Invalid JSON received for file '.$userData['path']);
                         }
 
-                        if ($handleRetry($response, $userData)) {
+                        if ($responseNeedsRetry($response, $userData)) {
                             continue;
                         }
 
