@@ -145,7 +145,7 @@ class Mirror {
     {
         $this->output('Resync requested'.PHP_EOL);
 
-        $listingResp = $this->client->request('GET', $this->apiUrl.'/packages/list.json', ['headers' => ['Host' => parse_url($this->apiUrl, PHP_URL_HOST)]]);
+        $listingResp = $this->client->request('GET', $this->apiUrl.'/packages/list.json?'.md5(uniqid()), ['headers' => ['Host' => parse_url($this->apiUrl, PHP_URL_HOST)]]);
         if ($listingResp->getHeaders()['content-encoding'][0] !== 'gzip') {
             throw new \Exception('Expected gzip encoded responses, something is off');
         }
