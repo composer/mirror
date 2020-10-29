@@ -646,8 +646,8 @@ class Mirror {
                 'User-Agent' => $this->userAgent,
                 'Host' => $this->hostname,
             ],
-            'timeout' => 10,
-            'max_duration' => 15,
+            'timeout' => 30,
+            'max_duration' => 30,
             'http_version' => '2.0',
         ]);
     }
