@@ -38,6 +38,7 @@ class Mirror {
     private $url;
     private $apiUrl;
     private $hostname;
+    private $gzipOnly;
     private $syncRootOnV2;
     private $downloaded = 0;
 
@@ -49,12 +50,16 @@ class Mirror {
         $this->hostname = $config['repo_hostname'] ?? parse_url($this->url, PHP_URL_HOST);
         $this->userAgent = $config['user_agent'];
         $this->syncRootOnV2 = !($config['has_v1_mirror'] ?? true);
+        $this->gzipOnly = $config['gzip_only'] ?? false;
 
         if (isset($config['statsd']) && is_array($config['statsd'])) {
             $this->statsdConnect($config['statsd'][0], $config['statsd'][1]);
         }
 
         $this->verbose = in_array('-v', $_SERVER['argv']);
+        if ($this->verbose) {
+            ini_set('display_errors', 1);
+        }
     }
 
     public function syncRootOnV2()
@@ -78,7 +83,21 @@ class Mirror {
 
         $gzipped = gzencode($rootData, 8);
         $this->write('/packages.json', $rootData, $gzipped, strtotime($rootResp->getHeaders()['last-modified'][0]));
-        $this->output('R');
+        $this->output('X');
+
+        $this->statsdIncrement('mirror.sync_root');
+    }
+
+    public function getV2Timestamp(): int
+    {
+        $this->initClient();
+
+        $resp = $this->client->request('GET', $this->apiUrl.'/metadata/changes.json', ['headers' => ['Host' => parse_url($this->apiUrl, PHP_URL_HOST)]]);
+        $content = json_decode($resp->getContent(false), true);
+        if ($resp->getStatusCode() === 400 && null !== $content) {
+            return $content['timestamp'];
+        }
+        throw new \Exception('Failed to fetch timestamp from API, got invalid response '.$resp->getStatusCode().': '.$resp->getContent());
     }
 
     public function syncV2()
@@ -90,12 +109,7 @@ class Mirror {
 
         $timestampStore = './last_metadata_timestamp';
         if (!file_exists($timestampStore)) {
-            $resp = $this->client->request('GET', $this->apiUrl.'/metadata/changes.json', ['headers' => ['Host' => parse_url($this->apiUrl, PHP_URL_HOST)]]);
-            $content = json_decode($resp->getContent(false), true);
-            if ($resp->getStatusCode() === 400 && null !== $content) {
-                return $this->resync($content['timestamp']);
-            }
-            throw new \Exception('Failed to fetch timestamp from API, got invalid response '.$resp->getStatusCode().': '.$resp->getContent());
+            return $this->resync($this->getV2Timestamp());
         }
         $lastTime = trim(file_get_contents($timestampStore));
 
@@ -121,7 +135,7 @@ class Mirror {
                 // package here can be foo/bar or foo/bar~dev, not strictly a package name
                 $pkg = $action['package'];
                 $provPathV2 = '/p2/'.$pkg.'.json';
-                $headers = file_exists($this->target.$provPathV2) ? ['If-Modified-Since' => gmdate('D, d M Y H:i:s T', filemtime($this->target.$provPathV2))] : [];
+                $headers = file_exists($this->target.$provPathV2.'.gz') ? ['If-Modified-Since' => gmdate('D, d M Y H:i:s T', filemtime($this->target.$provPathV2.'.gz'))] : [];
                 $userData = ['path' => $provPathV2, 'minimumFilemtime' => $action['time'], 'retries' => 0];
                 $requests[] = ['GET', $this->url.$provPathV2, ['user_data' => $userData, 'headers' => $headers]];
             } elseif ($action['type'] === 'delete') {
@@ -141,7 +155,7 @@ class Mirror {
         return true;
     }
 
-    private function resync(int $timestamp)
+    public function resync(int $timestamp)
     {
         $this->output('Resync requested'.PHP_EOL);
 
@@ -157,15 +171,16 @@ class Mirror {
             $names = array_flip($list['packageNames']);
 
             foreach ($finder as $vendorDir) {
-                foreach (glob(((string) $vendorDir).'/*.json') as $file) {
-                    if (!preg_match('{/([^/]+/[^/]+?)(~dev)?\.json$}', strtr($file, '\\', '/'), $match)) {
+                foreach (glob(((string) $vendorDir).'/*.json.gz') as $file) {
+                    if (!preg_match('{/([^/]+/[^/]+?)(~dev)?\.json.gz$}', strtr($file, '\\', '/'), $match)) {
                         throw new \LogicException('Could not match package name from '.$path);
                     }
 
                     if (!isset($names[$match[1]])) {
                         unlink((string) $file);
-                        if (file_exists(((string) $file).'.gz')) {
-                            unlink(((string) $file).'.gz');
+                        // also remove the version without .gz suffix if it exists
+                        if (file_exists(substr((string) $file, 0, -3))) {
+                            unlink(substr((string) $file, 0, -3));
                         }
                     }
                 }
@@ -176,12 +191,12 @@ class Mirror {
         $requests = [];
         foreach ($list['packageNames'] as $pkg) {
             $provPathV2 = '/p2/'.$pkg.'.json';
-            $headers = file_exists($this->target.$provPathV2) ? ['If-Modified-Since' => gmdate('D, d M Y H:i:s T', filemtime($this->target.$provPathV2))] : [];
+            $headers = file_exists($this->target.$provPathV2.'.gz') ? ['If-Modified-Since' => gmdate('D, d M Y H:i:s T', filemtime($this->target.$provPathV2.'.gz'))] : [];
             $userData = ['path' => $provPathV2, 'minimumFilemtime' => 0, 'retries' => 0];
             $requests[] = ['GET', $this->url.$provPathV2, ['user_data' => $userData, 'headers' => $headers]];
 
             $provPathV2Dev = '/p2/'.$pkg.'~dev.json';
-            $headers = file_exists($this->target.$provPathV2Dev) ? ['If-Modified-Since' => gmdate('D, d M Y H:i:s T', filemtime($this->target.$provPathV2Dev))] : [];
+            $headers = file_exists($this->target.$provPathV2Dev.'.gz') ? ['If-Modified-Since' => gmdate('D, d M Y H:i:s T', filemtime($this->target.$provPathV2Dev.'.gz'))] : [];
             $userData = ['path' => $provPathV2Dev, 'minimumFilemtime' => 0, 'retries' => 0];
             $requests[] = ['GET', $this->url.$provPathV2Dev, ['user_data' => $userData, 'headers' => $headers]];
         }
@@ -197,12 +212,13 @@ class Mirror {
         $timestampStore = './last_metadata_timestamp';
         file_put_contents($timestampStore, $timestamp);
 
+        $this->statsdIncrement('mirror.resync');
+
         return true;
     }
 
     private function downloadV2Files(array $requests)
     {
-        $hasFailedRequests = false;
         $hasRetries = false;
 
         $responseNeedsRetry = function ($response, array $userData) use (&$hasRetries, &$requests): bool {
@@ -224,7 +240,7 @@ class Mirror {
                 $this->output('R');
                 $this->statsdIncrement('mirror.retry_provider_v2');
                 $userData['retries']++;
-                $headers = file_exists($this->target.$userData['path']) ? ['If-Modified-Since' => gmdate('D, d M Y H:i:s T', filemtime($this->target.$userData['path']))] : [];
+                $headers = file_exists($this->target.$userData['path'].'.gz') ? ['If-Modified-Since' => gmdate('D, d M Y H:i:s T', filemtime($this->target.$userData['path'].'.gz'))] : [];
                 $requests[] = ['GET', $this->url.$userData['path'], ['user_data' => $userData, 'headers' => $headers]];
 
                 return true;
@@ -233,7 +249,22 @@ class Mirror {
             return false;
         };
 
-        while ($requests && !$hasFailedRequests) {
+        $retryFailedReq = function (\Throwable $e, array $userData) use (&$hasRetries, &$requests): bool {
+            if ($userData['retries'] > 2) {
+                return false;
+            }
+
+            $hasRetries = true;
+            $this->output('E');
+            $this->statsdIncrement('mirror.retry_provider_v2_error');
+            $userData['retries']++;
+            $headers = file_exists($this->target.$userData['path'].'.gz') ? ['If-Modified-Since' => gmdate('D, d M Y H:i:s T', filemtime($this->target.$userData['path'].'.gz'))] : [];
+            array_unshift($requests, ['GET', $this->url.$userData['path'], ['user_data' => $userData, 'headers' => $headers]]);
+
+            return true;
+        };
+
+        while ($requests) {
             if ($hasRetries) {
                 sleep(2);
                 $hasRetries = false;
@@ -301,19 +332,24 @@ class Mirror {
                         $this->statsdIncrement('mirror.sync_provider_v2');
                     }
                 } catch (\Throwable $e) {
+                    // if it can be retried, we skip it for now
+                    if ($retryFailedReq($e, $response->getInfo('user_data'))) {
+                        $response->cancel();
+                        $this->downloaded++;
+                        continue;
+                    }
+
                     // abort all responses to avoid triggering any other exception then throw
                     array_map(function ($r) { $r->cancel(); }, $responses);
 
                     $this->statsdIncrement('mirror.provider_failure');
                     $this->downloaded++;
-                    var_dump(date('Y-m-d H:i:s').' '.get_class($e).' '.$e->getMessage());
-
-                    $hasFailedRequests = true;
+                    throw $e;
                 }
             }
         }
 
-        return !$hasFailedRequests;
+        return true;
     }
 
     public function sync()
@@ -345,7 +381,7 @@ class Mirror {
 
         foreach ($rootJson['provider-includes'] as $listing => $opts) {
             $listing = str_replace('%hash%', $opts['sha256'], $listing);
-            if (file_exists($this->target.'/'.$listing)) {
+            if (file_exists($this->target.'/'.$listing.'.gz')) {
                 continue;
             }
 
@@ -365,7 +401,7 @@ class Mirror {
                 $provPath = '/p/'.$pkg.'$'.$opts['sha256'].'.json';
                 $provAltPath = '/p/'.$pkg.'.json';
 
-                if (file_exists($this->target.$provPath)) {
+                if (file_exists($this->target.$provPath.'.gz')) {
                     continue;
                 }
 
@@ -376,9 +412,7 @@ class Mirror {
             $listingsToWrite['/'.$listing] = [$listingData, strtotime($listingResp->getHeaders()['last-modified'][0])];
         }
 
-        $hasFailedRequests = false;
-
-        while ($requests && !$hasFailedRequests) {
+        while ($requests) {
             $responses = [];
             foreach (array_splice($requests, 0, 200) as $req) {
                 $responses[] = $this->client->request(...$req);
@@ -422,15 +456,10 @@ class Mirror {
 
                     $this->statsdIncrement('mirror.provider_failure');
                     $this->downloaded++;
-                    var_dump(date('Y-m-d H:i:s').' '.get_class($e).' '.$e->getMessage());
 
-                    $hasFailedRequests = true;
+                    throw $e;
                 }
             }
-        }
-
-        if ($hasFailedRequests) {
-            return false;
         }
 
         foreach ($listingsToWrite as $listing => $listingData) {
@@ -442,7 +471,7 @@ class Mirror {
 
         $gzipped = gzencode($rootData, 8);
         $this->write('/packages.json', $rootData, $gzipped, strtotime($rootResp->getHeaders()['last-modified'][0]));
-        $this->output('R');
+        $this->output('X');
         $this->statsdIncrement('mirror.sync_root');
 
         $this->output(PHP_EOL);
@@ -456,19 +485,19 @@ class Mirror {
         // build up array of safe files
         $safeFiles = [];
 
-        $rootFile = $this->target.'/packages.json';
+        $rootFile = $this->target.'/packages.json.gz';
         if (!file_exists($rootFile)) {
             return;
         }
-        $rootJson = json_decode(file_get_contents($rootFile), true);
+        $rootJson = json_decode(gzdecode(file_get_contents($rootFile)), true);
 
         foreach ($rootJson['provider-includes'] as $listing => $opts) {
-            $listing = str_replace('%hash%', $opts['sha256'], $listing);
+            $listing = str_replace('%hash%', $opts['sha256'], $listing).'.gz';
             $safeFiles['/'.$listing] = true;
 
-            $listingJson = json_decode(file_get_contents($this->target.'/'.$listing), true);
+            $listingJson = json_decode(gzdecode(file_get_contents($this->target.'/'.$listing)), true);
             foreach ($listingJson['providers'] as $pkg => $opts) {
-                $provPath = '/p/'.$pkg.'$'.$opts['sha256'].'.json';
+                $provPath = '/p/'.$pkg.'$'.$opts['sha256'].'.json.gz';
                 $safeFiles[$provPath] = true;
             }
         }
@@ -481,7 +510,7 @@ class Mirror {
         $finder = Finder::create()->directories()->ignoreVCS(true)->in($this->target.'/p');
         foreach ($finder as $vendorDir) {
             $vendorFiles = Finder::create()->files()->ignoreVCS(true)
-                ->name('/\$[a-f0-9]+\.json$/')
+                ->name('/\$[a-f0-9]+\.json\.gz$/')
                 ->date('until 10minutes ago')
                 ->in((string) $vendorDir);
 
@@ -489,21 +518,23 @@ class Mirror {
                 $key = strtr(str_replace($this->target, '', $file), '\\', '/');
                 if (!isset($safeFiles[$key])) {
                     unlink((string) $file);
-                    if (file_exists(((string) $file).'.gz')) {
-                        unlink(((string) $file).'.gz');
+                    // also remove the version without .gz suffix if it exists
+                    if (file_exists(substr((string) $file, 0, -3))) {
+                        unlink(substr((string) $file, 0, -3));
                     }
                 }
             }
         }
 
         // clean up old provider listings
-        $finder = Finder::create()->depth(0)->files()->name('provider-*.json')->ignoreVCS(true)->in($this->target.'/p')->date('until 10minutes ago');
+        $finder = Finder::create()->depth(0)->files()->name('provider-*.json.gz')->ignoreVCS(true)->in($this->target.'/p')->date('until 10minutes ago');
         foreach ($finder as $provider) {
             $key = strtr(str_replace($this->target, '', $provider), '\\', '/');
             if (!isset($safeFiles[$key])) {
                 unlink((string) $provider);
-                if (file_exists(((string) $provider).'.gz')) {
-                    unlink(((string) $provider).'.gz');
+                // also remove the version without .gz suffix if it exists
+                if (file_exists(substr((string) $provider, 0, -3))) {
+                    unlink(substr((string) $provider, 0, -3));
                 }
             }
         }
@@ -554,11 +585,13 @@ class Mirror {
             mkdir(dirname($path), 0777, true);
         }
 
-        file_put_contents($path.'.tmp', $content);
+        if (!$this->gzipOnly || $file === '/packages.json') {
+            file_put_contents($path.'.tmp', $content);
+            touch($path.'.tmp', $mtime);
+            rename($path.'.tmp', $path);
+        }
         file_put_contents($path.'.gz.tmp', $gzipped);
-        touch($path.'.tmp', $mtime);
         touch($path.'.gz.tmp', $mtime);
-        rename($path.'.tmp', $path);
         rename($path.'.gz.tmp', $path.'.gz');
     }
 
@@ -624,6 +657,8 @@ $lockName = 'mirror';
 $config = require __DIR__ . '/mirror.config.php';
 $isGC = false;
 $isV2 = false;
+$isV1 = false;
+$isResync = false;
 
 if (in_array('--gc', $_SERVER['argv'])) {
     $lockName .= '-gc';
@@ -632,7 +667,12 @@ if (in_array('--gc', $_SERVER['argv'])) {
     $lockName .= '-v2';
     $isV2 = true;
 } elseif (in_array('--v1', $_SERVER['argv'])) {
+    $isV1 = true;
     // default mode
+} elseif (in_array('--resync', $_SERVER['argv'])) {
+    // resync uses same lock name as --v2 to make sure they can not run in parallel
+    $lockName .= '-v2';
+    $isResync = true;
 } else {
     throw new \RuntimeException('Missing one of --gc, --v1 or --v2 modes');
 }
@@ -640,43 +680,57 @@ if (in_array('--gc', $_SERVER['argv'])) {
 $lockFactory = new LockFactory(new FlockStore(sys_get_temp_dir()));
 $lock = $lockFactory->createLock($lockName, 3600);
 
-if (!$lock->acquire()) {
-    exit(0);
-}
-
-$mirror = new Mirror($config);
-if ($isGC) {
-    $mirror->gc();
-    $lock->release();
+// if resync is running, we wait for the lock to be
+// acquired in case a v2 process is still running
+// otherwise abort immediately
+if (!$lock->acquire($isResync)) {
+    // sleep so supervisor assumes a correct start and we avoid restarting too quickly, then exit
+    sleep(3);
     exit(0);
 }
 
 try {
-    $iterations = $config['iterations'];
-    if ($isV2) {
-        // sync root only once per script run as on a v2 only repo it rarely changes
-        $mirror->syncRootOnV2();
+    $mirror = new Mirror($config);
+    if ($isGC) {
+        $mirror->gc();
+        $lock->release();
+        exit(0);
     }
+    if ($isResync) {
+        $mirror->resync($mirror->getV2Timestamp());
+        $lock->release();
+        exit(0);
+    }
+
+    $iterations = $config['iterations'];
+    $hasSyncedRoot = false;
 
     while ($iterations--) {
         if ($isV2) {
+            // sync root only once in a while as on a v2 only repo it rarely changes
+            if (($iterations % 20) === 0 || $hasSyncedRoot === false) {
+                $mirror->syncRootOnV2();
+                $hasSyncedRoot = true;
+            }
             if (!$mirror->syncV2()) {
                 $lock->release();
                 exit(1);
             }
-        } else {
+        } elseif ($isV1) {
             if (!$mirror->sync()) {
                 $lock->release();
                 exit(1);
             }
         }
         sleep($config['iteration_interval']);
+        $lock->refresh();
     }
 } catch (\Throwable $e) {
     // sleep so supervisor assumes a correct start and we avoid restarting too quickly, then rethrow
     $mirror->statsdIncrement('mirror.hard_failure');
     sleep(3);
-    echo 'Mirror '.($isV2 ? 'v2' : '').' job failed at '.date('Y-m-d H:i:s');
+    echo 'Mirror '.($isV2 ? 'v2' : '').' job failed at '.date('Y-m-d H:i:s').PHP_EOL;
+    echo '['.get_class($e).'] '.$e->getMessage().PHP_EOL;
     throw $e;
 } finally {
     $lock->release();
