@@ -4,7 +4,7 @@
 use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Component\HttpClient\Exception\TransportException;
 use Symfony\Component\Finder\Finder;
-use Symfony\Component\Lock\Factory;
+use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\Store\FlockStore;
 
 ini_set('memory_limit', '3G');
@@ -637,8 +637,8 @@ if (in_array('--gc', $_SERVER['argv'])) {
     throw new \RuntimeException('Missing one of --gc, --v1 or --v2 modes');
 }
 
-$lockFactory = new Factory(new FlockStore(sys_get_temp_dir()));
-$lock = $lockFactory->createLock($lockName);
+$lockFactory = new LockFactory(new FlockStore(sys_get_temp_dir()));
+$lock = $lockFactory->createLock($lockName, 3600);
 
 if (!$lock->acquire()) {
     exit(0);
