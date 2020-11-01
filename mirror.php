@@ -571,7 +571,7 @@ class Mirror {
         }
 
         if ($resp->getStatusCode() >= 300) {
-            throw new \RuntimeException('Failed to fetch '.$file.' => '.$response->getStatusCode() .' '. $response->getContent());
+            throw new \RuntimeException('Failed to fetch '.$file.' => '.$resp->getStatusCode() .' '. $resp->getContent());
         }
 
         return $resp;
