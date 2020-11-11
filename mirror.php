@@ -482,6 +482,11 @@ class Mirror {
 
     public function gc()
     {
+        // GC is only for v1 metadata, so abort if v1 is not enabled
+        if ($this->syncRootOnV2) {
+            return;
+        }
+
         // build up array of safe files
         $safeFiles = [];
 
