@@ -24,6 +24,14 @@ However, if you want to run a resync manually to see what is going on you can us
 This will make sure the v2 metadata is in sync again (wait for the script to complete which may take a while) and
 then running `./mirror.php --v2` regularly again should get you back on regular updates.
 
+## Requirements
+
+- PHP 7.3+
+- A web server configured:
+  - to send Last-Modified headers, and respond correctly to `If-Modified-Since` requests with `304 Not Modified`
+  - to allow HTTP/2 if possible as HTTP/1 performance will be much reduced
+  - to respond correctly with 404s for missing files
+
 ## Update
 
 In your mirror dir:
