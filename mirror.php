@@ -189,16 +189,19 @@ class Mirror {
 
         // download all package data
         $requests = [];
-        foreach ($list['packageNames'] as $pkg) {
-            $provPathV2 = '/p2/'.$pkg.'.json';
-            $headers = file_exists($this->target.$provPathV2.'.gz') ? ['If-Modified-Since' => gmdate('D, d M Y H:i:s T', filemtime($this->target.$provPathV2.'.gz'))] : [];
-            $userData = ['path' => $provPathV2, 'minimumFilemtime' => 0, 'retries' => 0];
-            $requests[] = ['GET', $this->url.$provPathV2, ['user_data' => $userData, 'headers' => $headers]];
+        $appendRequest = function ($path) use (&$requests) {
+            $headers = [];
+            $filemtime = file_exists($this->target.$path.'.gz') ? filemtime($this->target.$path.'.gz') : 0;
+            if ($filemtime) {
+                $headers = ['If-Modified-Since' => gmdate('D, d M Y H:i:s T', $filemtime)];
+            }
+            $userData = ['path' => $path, 'minimumFilemtime' => 0, 'retries' => 0, 'resyncIfNewerThanSource' => true];
+            $requests[] = ['GET', $this->url.$path, ['user_data' => $userData, 'headers' => $headers]];
+        };
 
-            $provPathV2Dev = '/p2/'.$pkg.'~dev.json';
-            $headers = file_exists($this->target.$provPathV2Dev.'.gz') ? ['If-Modified-Since' => gmdate('D, d M Y H:i:s T', filemtime($this->target.$provPathV2Dev.'.gz'))] : [];
-            $userData = ['path' => $provPathV2Dev, 'minimumFilemtime' => 0, 'retries' => 0];
-            $requests[] = ['GET', $this->url.$provPathV2Dev, ['user_data' => $userData, 'headers' => $headers]];
+        foreach ($list['packageNames'] as $pkg) {
+            $appendRequest('/p2/'.$pkg.'.json');
+            $appendRequest('/p2/'.$pkg.'~dev.json');
         }
 
         $result = $this->downloadV2Files($requests);
