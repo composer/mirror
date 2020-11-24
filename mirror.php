@@ -320,8 +320,16 @@ class Mirror {
                         $userData = $response->getInfo('user_data');
 
                         $metadata = $response->getContent();
-                        if (null === json_decode($metadata, true)) {
+                        $decoded = json_decode($metadata, true);
+                        if (null === $decoded) {
                             throw new \Exception('Invalid JSON received for file '.$userData['path']);
+                        }
+
+                        // check the response is for the correct package as safety check against corruption
+                        preg_match('{^/p2/(.+?)(~dev)?.json$}', $userData['path'], $match);
+                        $packageName = $match[1];
+                        if (!isset($decoded['packages'][$packageName])) {
+                            throw new \Exception('Invalid response for file '.$userData['path'].', '.$packageName.' could not be found in file content: '.substr($metadata, 0, 300));
                         }
 
                         if ($responseNeedsRetry($response, $userData)) {
