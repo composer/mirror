@@ -3,8 +3,8 @@
 return [
     // directory where metadata files will get saved
     'target_dir' => /* TODO */,
-    // user agent describing your mirror node, if possible include domain name of mirror
-    'user_agent' => /* TODO */,
+    // user agent describing your mirror node, if possible include domain name of mirror, and a contact email address
+    'user_agent' => /* TODO Mirror for foo.com (mycontact@example.org) */,
     // source repository URL
     'repo_url' => 'https://repo.packagist.org',
     // source repository hostname (optional, will guess from repo_url)
