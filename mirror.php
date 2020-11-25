@@ -188,6 +188,20 @@ class Mirror {
                         if (file_exists(substr((string) $file, 0, -3))) {
                             unlink(substr((string) $file, 0, -3));
                         }
+                        continue;
+                    }
+
+                    // check for corrupted file if it is older than the bugfix date, and remove if they are corrupted
+                    if (filemtime((string) $file) < 1606297354) {
+                        $contents = json_decode(gzdecode(file_get_contents((string) $file)), true);
+                        if (!isset($contents['packages'][$match[1]])) {
+                            unlink((string) $file);
+                            // also remove the version without .gz suffix if it exists
+                            if (file_exists(substr((string) $file, 0, -3))) {
+                                unlink(substr((string) $file, 0, -3));
+                            }
+                            continue;
+                        }
                     }
                 }
             }
