@@ -358,6 +358,16 @@ class Mirror {
                         if (!isset($decoded['packages'][$packageName])) {
                             throw new \Exception('Invalid response for file '.$userData['path'].', '.$packageName.' could not be found in file content: '.substr($metadata, 0, 300));
                         }
+                        foreach ($decoded['packages'][$packageName] as $version) {
+                            $isDevVersion = (bool) preg_match('{^dev-|-dev$}', $version['version_normalized']);
+                            if (($match[2] ?? '') === '~dev' && !$isDevVersion) {
+                                throw new \Exception('Invalid response for file '.$userData['path'].', expected dev versions and got non-dev ones: '.substr($metadata, 0, 300));
+                            }
+                            if (($match[2] ?? '') === '' && $isDevVersion) {
+                                throw new \Exception('Invalid response for file '.$userData['path'].', expected non-dev versions and got dev ones: '.substr($metadata, 0, 300));
+                            }
+                            break;
+                        }
 
                         if ($responseNeedsRetry($response, $userData)) {
                             continue;
