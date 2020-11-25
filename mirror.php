@@ -109,7 +109,13 @@ class Mirror {
 
         $timestampStore = './last_metadata_timestamp';
         if (!file_exists($timestampStore)) {
+            if (!is_writable(getcwd())) {
+                throw new \UnexpectedValueException('Cannot save last timestamp to last_metadata_timestamp in '.getcwd().'. Make sure the directory is writable.');
+            }
+
             return $this->resync($this->getV2Timestamp());
+        } elseif (!is_writable($timestampStore)) {
+            throw new \UnexpectedValueException('Cannot save last timestamp to last_metadata_timestamp in '.getcwd().'. Make sure the file is writable.');
         }
         $lastTime = trim(file_get_contents($timestampStore));
 
@@ -121,7 +127,7 @@ class Mirror {
 
         if ([] === $changes['actions']) {
             $this->output('No work' . PHP_EOL);
-            file_put_contents($timestampStore, $changes['timestamp']);
+            $this->writeLastTimestamp($changes['timestamp']);
             return true;
         }
 
@@ -150,7 +156,7 @@ class Mirror {
 
         $this->output(PHP_EOL);
         $this->output('Downloaded '.$this->downloaded.' files'.PHP_EOL);
-        file_put_contents($timestampStore, $changes['timestamp']);
+        $this->writeLastTimestamp($changes['timestamp']);
 
         return true;
     }
@@ -212,12 +218,19 @@ class Mirror {
         $this->output(PHP_EOL);
         $this->output('Downloaded '.$this->downloaded.' files'.PHP_EOL);
 
-        $timestampStore = './last_metadata_timestamp';
-        file_put_contents($timestampStore, $timestamp);
+        $this->writeLastTimestamp($timestamp);
 
         $this->statsdIncrement('mirror.resync');
 
         return true;
+    }
+
+    private function writeLastTimestamp(int $timestamp)
+    {
+        $timestampStore = './last_metadata_timestamp';
+        if (false === file_put_contents($timestampStore, $timestamp)) {
+            throw new \UnexpectedValueException('Could not save last timestamp to last_metadata_timestamp in '.getcwd().'. Make sure the file/directory is writable');
+        }
     }
 
     private function downloadV2Files(array $requests)
