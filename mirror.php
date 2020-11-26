@@ -107,17 +107,16 @@ class Mirror {
         $this->statsdIncrement('mirror.run');
         $this->downloaded = 0;
 
-        $timestampStore = './last_metadata_timestamp';
-        if (!file_exists($timestampStore)) {
+        if (!file_exists($this->getTimestampStorePath())) {
             if (!is_writable(getcwd())) {
                 throw new \UnexpectedValueException('Cannot save last timestamp to last_metadata_timestamp in '.getcwd().'. Make sure the directory is writable.');
             }
 
             return $this->resync($this->getV2Timestamp());
-        } elseif (!is_writable($timestampStore)) {
+        } elseif (!is_writable($this->getTimestampStorePath())) {
             throw new \UnexpectedValueException('Cannot save last timestamp to last_metadata_timestamp in '.getcwd().'. Make sure the file is writable.');
         }
-        $lastTime = trim(file_get_contents($timestampStore));
+        $lastTime = trim(file_get_contents($this->getTimestampStorePath()));
 
         $changesResp = $this->client->request('GET', $this->apiUrl.'/metadata/changes.json?since='.$lastTime, ['headers' => ['Host' => parse_url($this->apiUrl, PHP_URL_HOST)]]);
         if ($changesResp->getHeaders()['content-encoding'][0] !== 'gzip') {
@@ -239,10 +238,22 @@ class Mirror {
         return true;
     }
 
+    private function getTimestampStorePath()
+    {
+        $timestampStore = __DIR__.'/last_metadata_timestamp';
+
+        // migrate legacy path to new dir if available
+        $timestampStoreLegacy = './last_metadata_timestamp';
+        if (file_exists($timestampStoreLegacy) && !file_exists($timestampStore)) {
+            rename($timestampStoreLegacy, $timestampStore);
+        }
+
+        return $timestampStore;
+    }
+
     private function writeLastTimestamp(int $timestamp)
     {
-        $timestampStore = './last_metadata_timestamp';
-        if (false === file_put_contents($timestampStore, $timestamp)) {
+        if (false === file_put_contents($this->getTimestampStorePath(), $timestamp)) {
             throw new \UnexpectedValueException('Could not save last timestamp to last_metadata_timestamp in '.getcwd().'. Make sure the file/directory is writable');
         }
     }
