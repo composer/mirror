@@ -7,6 +7,6 @@
         "symfony/filesystem": "^5.1",
         "symfony/finder": "^5.1",
         "symfony/lock": "^5.1",
-        "symfony/http-client": "5.1.*@dev"
+        "symfony/http-client": "^5.1.9"
     }
 }
