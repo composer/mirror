@@ -2,6 +2,12 @@
 
 ## Setup
 
+### Scripted Setup
+
+- See https://github.com/peter279k/mirror-kickstarter if you are looking for automated scripts dealing with the setup of mirrors.
+
+### Manual Setup
+
 - `git clone https://github.com/composer/mirror mirror`
 - `cd mirror`
 - `composer install`
