@@ -677,15 +677,32 @@ class Mirror {
 
     public function statsdIncrement($metric)
     {
+        static $loggedStatsdError = null;
+
         if ($this->statsdSocket) {
             $message = $metric.':1|c';
-            @fwrite($this->statsdSocket, $message);
+            try {
+                fwrite($this->statsdSocket, $message);
+            } catch (\ErrorException $e) {
+                if (!$loggedStatsdError) {
+                    trigger_error('Statsd not responding: '.$e->getMessage(), E_USER_WARNING);
+                    $loggedStatsdError = true;
+                }
+            }
         }
     }
 
     private function statsdConnect(string $ip, int $port)
     {
-        $socket = @fsockopen('udp://' . $ip, $port, $errno, $errstr, 1);
+        try {
+            $socket = fsockopen('udp://' . $ip, $port, $errno, $errstr, 1);
+        } catch (\ErrorException $e) {
+            trigger_error(
+                'StatsD server connection failed: ' . $e->getMessage(),
+                E_USER_WARNING
+            );
+            return;
+        }
         if ($socket === false) {
             trigger_error(
                 'StatsD server connection failed (' . $errno . ') ' . $errstr,
@@ -710,8 +727,8 @@ class Mirror {
                 'User-Agent' => $this->userAgent,
                 'Host' => $this->hostname,
             ],
-            'timeout' => 30,
-            'max_duration' => 30,
+            'timeout' => 120,
+            'max_duration' => 120,
             'http_version' => '2.0',
         ]);
     }
