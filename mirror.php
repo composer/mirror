@@ -147,7 +147,6 @@ class Mirror {
                 $this->delete($action['package']);
             }
         }
-        sleep(1);
         $result = $this->downloadV2Files($requests);
         if (!$result) {
             return false;
