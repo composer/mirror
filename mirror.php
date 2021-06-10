@@ -147,7 +147,7 @@ class Mirror {
                 $this->delete($action['package']);
             }
         }
-
+        sleep(1);
         $result = $this->downloadV2Files($requests);
         if (!$result) {
             return false;
@@ -270,15 +270,16 @@ class Mirror {
 
             // got an outdated file, possibly fetched from a mirror which was not yet up to date, so retry after 2sec
             if ($is404 || $mtime < $userData['minimumFilemtime']) {
-                if ($userData['retries'] > 2) {
-                    // 404s after 3 retries should be deemed to have really been deleted, so we stop retrying
+                sleep($userData['retries']);
+                if ($userData['retries'] > 10) {
+                    // 404s after 10 retries should be deemed to have really been deleted, so we stop retrying
                     if ($is404) {
                         return false;
                     }
                     throw new \Exception('Too many retries, could not update '.$userData['path'].' as the origin server returns an older file ('.$mtime.', expected '.$userData['minimumFilemtime'].')');
                 }
                 $hasRetries = true;
-                $this->output('R');
+                $this->output('R['.$userData['retries'].']');
                 $this->statsdIncrement('mirror.retry_provider_v2');
                 $userData['retries']++;
                 $headers = file_exists($this->target.$userData['path'].'.gz') ? ['If-Modified-Since' => gmdate('D, d M Y H:i:s T', filemtime($this->target.$userData['path'].'.gz'))] : [];
