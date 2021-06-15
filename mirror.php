@@ -131,7 +131,7 @@ class Mirror {
             throw new \UnexpectedValueException('Cannot save last timestamp to last_metadata_timestamp in '.getcwd().'. Make sure the file is writable.');
         }
         $lastTime = trim(file_get_contents($this->getTimestampStorePath()));
-        $this->out('Last update was on '.new DateTimeExt($lastTime));
+        $this->output('Last update was on '.new DateTimeExt($lastTime).PHP_EOL);
         $changesResp = $this->client->request('GET', $this->apiUrl.'/metadata/changes.json?since='.$lastTime, ['headers' => ['Host' => parse_url($this->apiUrl, PHP_URL_HOST)]]);
         if ($changesResp->getHeaders()['content-encoding'][0] !== 'gzip') {
             throw new \Exception('Expected gzip encoded responses, something is off');
