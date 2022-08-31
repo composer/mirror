@@ -1,12 +1,12 @@
 {
     "require": {
-        "php": "^7.3",
+        "php": "^7.3 || ^8",
         "ext-curl": "*",
         "ext-zlib": "*",
         "ext-json": "*",
-        "symfony/filesystem": "^5.1",
-        "symfony/finder": "^5.1",
-        "symfony/lock": "^5.1",
-        "symfony/http-client": "^5.1.9"
+        "symfony/filesystem": "^5.4",
+        "symfony/finder": "^5.4",
+        "symfony/lock": "^5.4",
+        "symfony/http-client": "^5.4"
     }
 }
