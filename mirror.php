@@ -28,6 +28,18 @@ set_error_handler(function ($errno, $errstr, $errfile, $errline) {
     throw new \ErrorException($errstr, $errno, E_ERROR, $errfile, $errline);
 });
 
+Class DateTimeExt extends DateTime {
+    
+    public function __construct(string $timestamp) {
+        parent::__construct();
+        $this->createFromFormat('u', $timestamp);
+    }
+
+    public function __toString() {
+        return $this->format('Y-m-d H:i');
+    }
+}
+
 class Mirror {
     private $target;
     private $context;
@@ -78,12 +90,13 @@ class Mirror {
         $hash = hash('sha256', $rootData);
 
         if ($hash === $this->getHash('/packages.json')) {
+            $this->output('No work - /packages.json hash unchanged' . PHP_EOL); 
             return;
         }
 
         $gzipped = gzencode($rootData, 8);
         $this->write('/packages.json', $rootData, $gzipped, strtotime($rootResp->getHeaders()['last-modified'][0]));
-        $this->output('X');
+        $this->output(' X(P) ');
 
         $this->statsdIncrement('mirror.sync_root');
     }
@@ -95,6 +108,7 @@ class Mirror {
         $resp = $this->client->request('GET', $this->apiUrl.'/metadata/changes.json', ['headers' => ['Host' => parse_url($this->apiUrl, PHP_URL_HOST)]]);
         $content = json_decode($resp->getContent(false), true);
         if ($resp->getStatusCode() === 400 && null !== $content) {
+            $this->output('API Timestamp is '. new DateTimeExt($content['timestamp']).PHP_EOL);
             return $content['timestamp'];
         }
         throw new \Exception('Failed to fetch timestamp from API, got invalid response '.$resp->getStatusCode().': '.$resp->getContent());
@@ -117,7 +131,7 @@ class Mirror {
             throw new \UnexpectedValueException('Cannot save last timestamp to last_metadata_timestamp in '.getcwd().'. Make sure the file is writable.');
         }
         $lastTime = trim(file_get_contents($this->getTimestampStorePath()));
-
+        $this->output('Last update was on '.new DateTimeExt($lastTime).PHP_EOL);
         $changesResp = $this->client->request('GET', $this->apiUrl.'/metadata/changes.json?since='.$lastTime, ['headers' => ['Host' => parse_url($this->apiUrl, PHP_URL_HOST)]]);
         if ($changesResp->getHeaders()['content-encoding'][0] !== 'gzip') {
             throw new \Exception('Expected gzip encoded responses, something is off');
@@ -125,7 +139,7 @@ class Mirror {
         $changes = json_decode($changesResp->getContent(), true);
 
         if ([] === $changes['actions']) {
-            $this->output('No work' . PHP_EOL);
+            $this->output('No changes since '. new DateTimeExt($lastTime) . PHP_EOL);
             $this->writeLastTimestamp($changes['timestamp']);
             return true;
         }
@@ -147,7 +161,6 @@ class Mirror {
                 $this->delete($action['package']);
             }
         }
-
         $result = $this->downloadV2Files($requests);
         if (!$result) {
             return false;
@@ -162,7 +175,7 @@ class Mirror {
 
     public function resync(int $timestamp)
     {
-        $this->output('Resync requested'.PHP_EOL);
+        $this->output('Resync requested from '. new DateTimeExt($timestamp) .PHP_EOL);
 
         $listingResp = $this->client->request('GET', $this->apiUrl.'/packages/list.json?'.md5(uniqid()), ['headers' => ['Host' => parse_url($this->apiUrl, PHP_URL_HOST)]]);
         if ($listingResp->getHeaders()['content-encoding'][0] !== 'gzip') {
@@ -222,7 +235,7 @@ class Mirror {
             $appendRequest('/p2/'.$pkg.'.json');
             $appendRequest('/p2/'.$pkg.'~dev.json');
         }
-
+        
         $result = $this->downloadV2Files($requests);
         if (!$result) {
             return false;
@@ -270,15 +283,16 @@ class Mirror {
 
             // got an outdated file, possibly fetched from a mirror which was not yet up to date, so retry after 2sec
             if ($is404 || $mtime < $userData['minimumFilemtime']) {
-                if ($userData['retries'] > 2) {
-                    // 404s after 3 retries should be deemed to have really been deleted, so we stop retrying
+                sleep($userData['retries']);
+                if ($userData['retries'] > 10) {
+                    // 404s after 10 retries should be deemed to have really been deleted, so we stop retrying
                     if ($is404) {
                         return false;
                     }
                     throw new \Exception('Too many retries, could not update '.$userData['path'].' as the origin server returns an older file ('.$mtime.', expected '.$userData['minimumFilemtime'].')');
                 }
                 $hasRetries = true;
-                $this->output('R');
+                $this->output('R['.$userData['retries'].']');
                 $this->statsdIncrement('mirror.retry_provider_v2');
                 $userData['retries']++;
                 $headers = file_exists($this->target.$userData['path'].'.gz') ? ['If-Modified-Since' => gmdate('D, d M Y H:i:s T', filemtime($this->target.$userData['path'].'.gz'))] : [];
@@ -426,7 +440,7 @@ class Mirror {
         $hash = hash('sha256', $rootData);
 
         if ($hash === $this->getHash('/packages.json')) {
-            $this->output('No work' . PHP_EOL);
+            $this->output('No work - /packages.json hash unchanged' . PHP_EOL);
             return true;
         }
 
@@ -530,7 +544,7 @@ class Mirror {
 
         $gzipped = gzencode($rootData, 8);
         $this->write('/packages.json', $rootData, $gzipped, strtotime($rootResp->getHeaders()['last-modified'][0]));
-        $this->output('X');
+        $this->output(' X(P) ');
         $this->statsdIncrement('mirror.sync_root');
 
         $this->output(PHP_EOL);
@@ -551,6 +565,7 @@ class Mirror {
 
         $rootFile = $this->target.'/packages.json.gz';
         if (!file_exists($rootFile)) {
+            $this->output($rootFile.' doesn\'t exists' . PHP_EOL);
             return;
         }
         $rootJson = json_decode(gzdecode(file_get_contents($rootFile)), true);
