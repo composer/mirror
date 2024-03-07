@@ -563,8 +563,9 @@ class Mirror {
             return;
         }
 
-        // build up array of safe files
+        // build up array of safe files/packages
         $safeFiles = [];
+        $safePackages = [];
 
         $rootFile = $this->target.'/packages.json.gz';
         if (!file_exists($rootFile)) {
@@ -580,19 +581,22 @@ class Mirror {
             foreach ($listingJson['providers'] as $pkg => $opts) {
                 $provPath = '/p/'.$pkg.'$'.$opts['sha256'].'.json.gz';
                 $safeFiles[$provPath] = true;
+                $safePackages[(string) $pkg] = true;
             }
         }
 
-        $this->cleanOldFiles($safeFiles);
+        $this->cleanOldFiles($safeFiles, $safePackages);
     }
 
     /**
      * @param array<string, true> $safeFiles
+     * @param array<string, true> $safePackages
      */
-    private function cleanOldFiles(array $safeFiles): void
+    private function cleanOldFiles(array $safeFiles, array $safePackages): void
     {
         $finder = Finder::create()->directories()->ignoreVCS(true)->in($this->target.'/p');
         foreach ($finder as $vendorDir) {
+            // clean up hashed provider files which are >10min old and not safe
             $vendorFiles = Finder::create()->files()->ignoreVCS(true)
                 ->name('/\$[a-f0-9]+\.json\.gz$/')
                 ->date('until 10minutes ago')
@@ -601,6 +605,23 @@ class Mirror {
             foreach ($vendorFiles as $file) {
                 $key = strtr(str_replace($this->target, '', (string) $file), '\\', '/');
                 if (!isset($safeFiles[$key])) {
+                    unlink((string) $file);
+                    // also remove the version without .gz suffix if it exists
+                    if (file_exists(substr((string) $file, 0, -3))) {
+                        unlink(substr((string) $file, 0, -3));
+                    }
+                }
+            }
+
+            // clean up foo/bar.json static files which are >10min old (to make sure newly synced ones do not get wiped before providers are written) if that package is not found anymore in the listings
+            $vendorFiles = Finder::create()->files()->ignoreVCS(true)
+                ->name('/^[A-Za-z0-9_.-]+\.json\.gz$/')
+                ->date('until 10minutes ago')
+                ->in((string) $vendorDir);
+
+            foreach ($vendorFiles as $file) {
+                $key = basename($vendorDir).'/'.basename((string) $file, '.json.gz');
+                if (!isset($safePackages[$key])) {
                     unlink((string) $file);
                     // also remove the version without .gz suffix if it exists
                     if (file_exists(substr((string) $file, 0, -3))) {
