@@ -381,7 +381,9 @@ class Mirror {
                         }
 
                         // check the response is for the correct package as safety check against corruption
-                        preg_match('{^/p2/(.+?)(~dev)?.json$}', $userData['path'], $match);
+                        if (!preg_match('{^/p2/(.+?)(~dev)?.json$}', $userData['path'], $match)) {
+                            throw new \Exception('Invalid path could not be parsed: '.$userData['path']);
+                        }
                         $packageName = $match[1];
                         if (!isset($decoded['packages'][$packageName])) {
                             throw new \Exception('Invalid response for file '.$userData['path'].', '.$packageName.' could not be found in file content: '.substr($metadata, 0, 300));
